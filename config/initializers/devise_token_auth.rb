@@ -7,7 +7,8 @@ DeviseTokenAuth.setup do |config|
 
   # By default, users will need to re-authenticate after 2 weeks. This setting
   # determines how long tokens will remain valid after they are issued.
-  config.token_lifespan = 2.months
+  # 2 months normally; SESSION_COOKIE_MAX_AGE_SECONDS (default 7 days) in SSO mode. Parsed and validated in 00_sso_mode.rb.
+  config.token_lifespan = SsoMode.token_lifespan
 
   # By default, old tokens are not invalidated when password is changed.
   # Enable this option if you want to make passwords updates to logout other devices.
