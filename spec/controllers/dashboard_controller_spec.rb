@@ -81,6 +81,96 @@ describe '/app/login', type: :request do
     end
   end
 
+  context 'with the page-level identity reconciliation' do
+    let(:sso_env) { { AUTH_TYPE: 'SSO', SSO_ACCOUNT_ID: '1', SMB_NAME: 'portal', SSO_TRUSTED_PROXY_CIDRS: nil } }
+    let(:session_cookie) { { 'uid' => 'alice@example.com', 'client' => 'c', 'access-token' => 't' }.to_json }
+
+    def load_page(cookie: :none, proxy_email: :none)
+      headers = {}
+      headers['Cookie'] = "cw_d_session_info=#{CGI.escape(cookie)}" unless cookie == :none
+      headers['X-Auth-Request-Email'] = proxy_email unless proxy_email == :none
+      get '/app/login', headers: headers
+    end
+
+    def session_cookie_lines
+      Array(response.headers['Set-Cookie']).select { |line| line.start_with?('cw_d_session_info=') }
+    end
+
+    def expired?
+      session_cookie_lines.any? { |line| line.include?('expires=Thu, 01 Jan 1970') }
+    end
+
+    around { |example| with_modified_env(sso_env) { example.run } }
+
+    it 'expires cw_d_session_info when uid differs from the proxy identity, and still renders the page' do
+      load_page(cookie: session_cookie, proxy_email: 'bob@example.com')
+      expect(response).to have_http_status(:success)
+      expect(expired?).to be true
+    end
+
+    it 'keeps the cookie when uid matches, case and whitespace insensitive on both sides' do
+      load_page(cookie: { 'uid' => ' Alice@Example.com ' }.to_json, proxy_email: '  ALICE@example.com ')
+      expect(session_cookie_lines).to be_empty
+    end
+
+    it 'keeps a usable cookie when the header is absent or blank' do
+      load_page(cookie: session_cookie)
+      expect(session_cookie_lines).to be_empty
+      load_page(cookie: session_cookie, proxy_email: '   ')
+      expect(session_cookie_lines).to be_empty
+    end
+
+    it 'expires the cookie when the header is unusable' do
+      load_page(cookie: session_cookie, proxy_email: 'a@b@c.com')
+      expect(expired?).to be true
+    end
+
+    it 'expires an unparsable cookie without a 500' do
+      ['not json', '{"uid":', '', '{'].reject(&:empty?).each do |bad|
+        load_page(cookie: bad)
+        expect(response).to have_http_status(:success)
+        expect(expired?).to be true
+      end
+    end
+
+    it 'expires a cookie whose uid is null, an array, a number, a hash or a boolean' do
+      ['null', '[]', '["alice@example.com"]', '5', '{"uid":null}', '{"uid":["a@example.com"]}', '{"uid":5}', '{"uid":{"a":1}}', '{"uid":true}',
+       '"just a string"'].each do |bad|
+        load_page(cookie: bad)
+        expect(response).to have_http_status(:success)
+        expect(expired?).to be(true), "expected #{bad} to be expired"
+      end
+    end
+
+    it 'expires a cookie nested deeper than the JSON nesting limit without raising' do
+      deep = "#{'{"a":' * 8}1#{'}' * 8}"
+      load_page(cookie: deep)
+      expect(response).to have_http_status(:success)
+      expect(expired?).to be true
+    end
+
+    it 'sends no Set-Cookie for a missing cookie' do
+      load_page(proxy_email: 'bob@example.com')
+      expect(session_cookie_lines).to be_empty
+    end
+
+    it 'runs before the other before-actions' do
+      filters = DashboardController._process_action_callbacks.select { |c| c.kind == :before }.map(&:filter)
+      own = %i[reconcile_page_identity set_application_pack set_global_config set_dashboard_scripts ensure_installation_onboarding
+               render_hc_if_custom_domain ensure_html_format]
+      expect(filters.select { |f| own.include?(f) }).to eq(own)
+    end
+
+    it 'leaves the cookie untouched when SSO mode is off' do
+      with_modified_env(AUTH_TYPE: nil) do
+        load_page(cookie: session_cookie, proxy_email: 'bob@example.com')
+        expect(session_cookie_lines).to be_empty
+        load_page(cookie: 'garbage')
+        expect(session_cookie_lines).to be_empty
+      end
+    end
+  end
+
   context 'with non-HTML format' do
     it 'returns not acceptable for JSON with error message' do
       get '/app/login', headers: { 'Accept' => 'application/json' }

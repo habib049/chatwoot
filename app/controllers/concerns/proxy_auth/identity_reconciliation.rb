@@ -8,11 +8,29 @@ module ProxyAuth::IdentityReconciliation
   DTA_HEADERS = %w[access-token client uid].freeze
   SESSION_COOKIE = 'cw_d_session_info'.freeze
 
-  included do
-    prepend_before_action :reconcile_proxy_identity
+  private
+
+  # Page loads: the shell holds no user data, so expiring a stale JS-readable session cookie is enough;
+  # the SPA then finds no cookie and proxy-logs-in as the incoming identity. The cookie is client input.
+  def reconcile_page_identity
+    return unless SsoMode.enabled?
+
+    raw = cookies[SESSION_COOKIE]
+    return if raw.blank?
+
+    cookies.delete(SESSION_COOKIE, path: '/') unless page_cookie_matches_identity?(raw)
   end
 
-  private
+  def page_cookie_matches_identity?(raw)
+    cookie = JSON.parse(raw, max_nesting: 5)
+    uid = cookie['uid'] if cookie.is_a?(Hash)
+    return false unless uid.is_a?(String)
+
+    identity = ProxyAuth::Identity.from_request(request)
+    identity.status == :absent || (identity.status == :present && uid.strip.downcase == identity.email)
+  rescue StandardError
+    false # unparsable, too deeply nested or wrongly typed: no usable session
+  end
 
   def reconcile_proxy_identity
     return unless reconcilable_request?

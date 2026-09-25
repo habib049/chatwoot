@@ -1,6 +1,7 @@
 class DashboardController < ActionController::Base
   include SwitchLocale
   include PortalHomeData
+  include ProxyAuth::IdentityReconciliation
 
   GLOBAL_CONFIG_KEYS = %w[
     LOGO
@@ -29,6 +30,7 @@ class DashboardController < ActionController::Base
     INSTALLATION_PRICING_PLAN
   ].freeze
 
+  before_action :reconcile_page_identity
   before_action :set_application_pack
   before_action :set_global_config
   before_action :set_dashboard_scripts
