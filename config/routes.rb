@@ -10,7 +10,7 @@ Rails.application.routes.draw do
 
   post 'resend_confirmation', to: 'auth/resend_confirmations#create'
 
-  # SSO proxy login (404 unless AUTH_TYPE=SSO)
+  # SSO proxy login (404 unless SSO mode is on, see SsoMode.enabled?)
   post 'proxy_auth/session', to: 'proxy_auth/sessions#create'
 
   ## renders the frontend paths only if its not an api only server
