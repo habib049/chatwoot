@@ -10,6 +10,9 @@ Rails.application.routes.draw do
 
   post 'resend_confirmation', to: 'auth/resend_confirmations#create'
 
+  # SSO proxy login (404 unless AUTH_TYPE=SSO)
+  post 'proxy_auth/session', to: 'proxy_auth/sessions#create'
+
   ## renders the frontend paths only if its not an api only server
   if ActiveModel::Type::Boolean.new.cast(ENV.fetch('CW_API_ONLY_SERVER', false))
     root to: 'api#index'
