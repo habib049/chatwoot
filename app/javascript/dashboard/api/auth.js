@@ -2,6 +2,7 @@
 
 import Cookies from 'js-cookie';
 import endPoints from './endPoints';
+import { isSsoMode } from 'shared/helpers/ssoMode';
 import {
   clearCookiesOnLogout,
   deleteIndexedDBOnLogout,
@@ -12,21 +13,19 @@ export default {
     const urlData = endPoints('validityCheck');
     return axios.get(urlData.url);
   },
-  logout() {
+  async logout() {
     const urlData = endPoints('logout');
-    const fetchPromise = new Promise((resolve, reject) => {
-      axios
-        .delete(urlData.url)
-        .then(response => {
-          deleteIndexedDBOnLogout();
-          clearCookiesOnLogout();
-          resolve(response);
-        })
-        .catch(error => {
-          reject(error);
-        });
-    });
-    return fetchPromise;
+    let response;
+    try {
+      response = await axios.delete(urlData.url);
+    } catch (error) {
+      // In SSO mode sign_out is best-effort: a 401 (sso_identity_changed, sso_session_required) or a
+      // network error must not trap the user in a session they are leaving.
+      if (!isSsoMode()) throw error;
+    }
+    deleteIndexedDBOnLogout();
+    clearCookiesOnLogout();
+    return response;
   },
   hasAuthCookie() {
     return !!Cookies.get('cw_d_session_info');
