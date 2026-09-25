@@ -92,3 +92,85 @@ describe('isOnOnboardingView', () => {
     expect(isOnOnboardingView()).toBe(false);
   });
 });
+
+describe('#validateRouteAccess in SSO mode', () => {
+  beforeEach(() => {
+    next.mockClear();
+    replaceRouteWithReload.mockClear();
+    clearBrowserSessionCookies.mockClear();
+    window.chatwootConfig = { ssoMode: true };
+  });
+
+  afterEach(() => {
+    delete window.chatwootConfig;
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    'auth_signup',
+    'auth_reset_password',
+    'auth_confirmation',
+    'auth_verify_email',
+    'auth_password_edit',
+    'sso_login',
+  ])('sends %s to login', name => {
+    validateRouteAccess({ name, meta: {} }, next);
+
+    expect(next).toHaveBeenCalledWith('/app/login');
+  });
+
+  it('does not honor ignoreSession', () => {
+    validateRouteAccess(
+      { name: 'auth_confirmation', meta: { ignoreSession: true } },
+      next
+    );
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(next).toHaveBeenCalledWith('/app/login');
+  });
+
+  it('lets the login route through, including one that carries ignoreSession', () => {
+    validateRouteAccess({ name: 'login', meta: { ignoreSession: true } }, next);
+
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it('does not honor the sso_auth_token handoff params', () => {
+    validateRouteAccess(
+      {
+        name: 'login',
+        query: { sso_auth_token: 'random_token', email: 'random@email.com' },
+      },
+      next
+    );
+
+    expect(clearBrowserSessionCookies).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  it('sends an unnamed route to login', () => {
+    validateRouteAccess({ meta: {} }, next);
+
+    expect(next).toHaveBeenCalledWith('/app/login');
+  });
+
+  it('redirects to the dashboard when an auth cookie is present', () => {
+    vi.spyOn(Cookies, 'get').mockReturnValueOnce(true);
+
+    validateRouteAccess({ name: 'auth_signup' }, next);
+
+    expect(replaceRouteWithReload).toHaveBeenCalledWith('/app/');
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('leaves the routing unchanged when SSO mode is off', () => {
+    window.chatwootConfig = { ssoMode: false };
+
+    validateRouteAccess(
+      { name: 'auth_confirmation', meta: { ignoreSession: true } },
+      next
+    );
+
+    expect(next).toHaveBeenCalledWith();
+  });
+});

@@ -1,6 +1,9 @@
 <script>
 // utils and composables
 import { login } from '../../api/auth';
+import { isSsoMode } from 'shared/helpers/ssoMode';
+import { proxyLogin } from 'dashboard/helper/ssoSession';
+import { getLoginRedirectURL } from '../../helpers/AuthHelper';
 import { mapGetters } from 'vuex';
 import { useAlert } from 'dashboard/composables';
 import { required, email } from '@vuelidate/validators';
@@ -75,6 +78,7 @@ export default {
       mfaToken: null,
       sessionsLimitReached: false,
       limitedSessions: [],
+      proxyLoginState: { loading: false, errorCode: '' },
     };
   },
   validations() {
@@ -101,14 +105,22 @@ export default {
         Boolean(window.chatwootConfig.googleOAuthClientId)
       );
     },
+    isSso() {
+      return isSsoMode();
+    },
     showSignupLink() {
-      return window.chatwootConfig.signupEnabled === 'true';
+      return !this.isSso && window.chatwootConfig.signupEnabled === 'true';
     },
     showSamlLogin() {
       return this.allowedLoginMethods.includes('saml');
     },
   },
   created() {
+    // SSO mode ignores the email and sso_auth_token query params entirely.
+    if (this.isSso) {
+      this.startProxyLogin();
+      return;
+    }
     if (this.ssoAuthToken) {
       this.submitLogin();
     }
@@ -131,6 +143,25 @@ export default {
     }
   },
   methods: {
+    async startProxyLogin() {
+      this.proxyLoginState = { loading: true, errorCode: '' };
+      try {
+        const user = await proxyLogin();
+        window.location = getLoginRedirectURL({
+          ssoAccountId: this.ssoAccountId,
+          ssoConversationId: this.ssoConversationId,
+          user,
+        });
+      } catch (error) {
+        // Shown with a Retry button; never retried or redirected automatically.
+        const errorCode =
+          typeof error?.errorCode === 'string' ? error.errorCode : '';
+        this.proxyLoginState = {
+          loading: false,
+          errorCode: errorCode || 'sso_login_failed',
+        };
+      }
+    },
     getTranslatedMessage(key) {
       // Avoid dynamic key warning by handling each case explicitly
       switch (key) {
@@ -321,8 +352,30 @@ export default {
       </p>
     </section>
 
+    <!-- SSO proxy login: no form, no local credential UI -->
+    <section
+      v-if="isSso"
+      class="flex flex-col items-center gap-4 mt-11"
+      data-testid="sso_login"
+    >
+      <div
+        v-if="proxyLoginState.errorCode"
+        class="flex flex-col items-center gap-4"
+      >
+        <p class="text-n-slate-12" data-testid="sso_error_code">
+          {{ proxyLoginState.errorCode }}
+        </p>
+        <NextButton
+          data-testid="sso_retry"
+          :label="$t('LOGIN.PROXY_LOGIN.RETRY')"
+          @click="startProxyLogin"
+        />
+      </div>
+      <Spinner v-else color-scheme="primary" size="" />
+    </section>
+
     <!-- Session Limit Section -->
-    <section v-if="sessionsLimitReached" class="mt-11">
+    <section v-else-if="sessionsLimitReached" class="mt-11">
       <SessionLimitOverlay
         :sessions="limitedSessions"
         @revoke="handleSessionRevoke"

@@ -1,4 +1,3 @@
-/* global axios */
 import authAPI from 'dashboard/api/auth';
 import {
   setAuthCredentials,
@@ -18,7 +17,7 @@ export const proxyLogin = async () => {
     const response = await authAPI.proxyLogin();
     setAuthCredentials(response);
     // The shared axios instance was built before this session existed; give it the new headers.
-    const common = axios?.defaults?.headers?.common;
+    const common = window.axios?.defaults?.headers?.common;
     if (common) {
       ['access-token', 'token-type', 'client', 'expiry', 'uid'].forEach(key => {
         common[key] = response.headers[key];

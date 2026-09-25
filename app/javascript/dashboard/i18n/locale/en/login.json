@@ -23,6 +23,9 @@
     "FORGOT_PASSWORD": "Forgot your password?",
     "CREATE_NEW_ACCOUNT": "Create a new account",
     "SUBMIT": "Login",
+    "PROXY_LOGIN": {
+      "RETRY": "Retry"
+    },
     "SAML": {
       "LABEL": "Login via SSO",
       "TITLE": "Initiate Single Sign-on (SSO)",

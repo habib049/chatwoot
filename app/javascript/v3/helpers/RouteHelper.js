@@ -3,6 +3,7 @@ import { clearBrowserSessionCookies } from 'dashboard/store/utils/api';
 import { hasAuthCookie } from './AuthHelper';
 import { DEFAULT_REDIRECT_URL } from 'dashboard/constants/globals';
 import { replaceRouteWithReload } from './CommonHelper';
+import { isSsoMode } from 'shared/helpers/ssoMode';
 
 const validateSSOLoginParams = to => {
   const isLoginRoute = to.name === 'login';
@@ -11,7 +12,26 @@ const validateSSOLoginParams = to => {
   return isLoginRoute && hasValidSSOParams;
 };
 
+// In SSO mode there is no local sign-in, signup or reset flow: `ignoreSession` and the sso_auth_token
+// handoff are not honoured and every route except `login` goes to `login` (the exemption is by route name).
+const validateSsoRouteAccess = (to, next) => {
+  if (hasAuthCookie()) {
+    replaceRouteWithReload(DEFAULT_REDIRECT_URL);
+    return;
+  }
+  if (to.name === 'login') {
+    next();
+    return;
+  }
+  next(frontendURL('login'));
+};
+
 export const validateRouteAccess = (to, next, chatwootConfig = {}) => {
+  if (isSsoMode()) {
+    validateSsoRouteAccess(to, next);
+    return;
+  }
+
   // Pages with ignoreSession:true would be rendered
   // even if there is an active session
   // Used for confirmation or password reset pages
