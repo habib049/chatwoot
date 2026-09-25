@@ -13,6 +13,9 @@ export default {
     const urlData = endPoints('validityCheck');
     return axios.get(urlData.url);
   },
+  proxyLogin() {
+    return axios.post('/proxy_auth/session');
+  },
   async logout() {
     const urlData = endPoints('logout');
     let response;

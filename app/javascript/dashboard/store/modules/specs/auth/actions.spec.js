@@ -4,6 +4,12 @@ import { actions } from '../../auth';
 import types from '../../../mutation-types';
 import * as APIHelpers from '../../../utils/api';
 import '../../../../routes';
+import { proxyLogin, recoverSession } from '../../../../helper/ssoSession';
+
+vi.mock('../../../../helper/ssoSession', () => ({
+  proxyLogin: vi.fn(),
+  recoverSession: vi.fn(),
+}));
 
 vi.spyOn(APIHelpers, 'setUser');
 vi.spyOn(APIHelpers, 'clearCookiesOnLogout');
@@ -16,6 +22,96 @@ global.axios = axios;
 vi.mock('axios');
 
 describe('#actions', () => {
+  afterEach(() => {
+    delete window.chatwootConfig;
+    commit.mockClear();
+    dispatch.mockClear();
+    proxyLogin.mockReset();
+    recoverSession.mockReset();
+    APIHelpers.clearCookiesOnLogout.mockClear();
+    Cookies.get.mockClear();
+  });
+
+  describe('#setUser with SSO', () => {
+    it('calls proxyLogin when SSO mode is on and there is no auth cookie', async () => {
+      window.chatwootConfig = { ssoMode: true };
+      Cookies.get.mockReturnValue(undefined);
+      proxyLogin.mockResolvedValue({ id: 1, name: 'Alice' });
+
+      await actions.setUser({ commit, dispatch });
+
+      expect(proxyLogin).toHaveBeenCalledTimes(1);
+      expect(commit.mock.calls).toEqual([
+        [types.SET_CURRENT_USER, { id: 1, name: 'Alice' }],
+        [types.SET_CURRENT_USER_UI_FLAGS, { isFetching: false }],
+      ]);
+    });
+
+    it('clears the user when proxyLogin fails', async () => {
+      window.chatwootConfig = { ssoMode: true };
+      Cookies.get.mockReturnValue(undefined);
+      proxyLogin.mockRejectedValue(new Error('sso_identity_missing'));
+
+      await actions.setUser({ commit, dispatch });
+
+      expect(commit.mock.calls[0]).toEqual([types.CLEAR_USER]);
+    });
+
+    it('still runs validityCheck when a cookie is present in SSO mode', async () => {
+      window.chatwootConfig = { ssoMode: true };
+      Cookies.get.mockReturnValue('{}');
+
+      await actions.setUser({ commit, dispatch });
+
+      expect(dispatch).toHaveBeenCalledWith('validityCheck');
+      expect(proxyLogin).not.toHaveBeenCalled();
+    });
+
+    it('does not call proxyLogin and clears the user when SSO mode is off', async () => {
+      window.chatwootConfig = { ssoMode: false };
+      Cookies.get.mockReturnValue(undefined);
+
+      await actions.setUser({ commit, dispatch });
+
+      expect(proxyLogin).not.toHaveBeenCalled();
+      expect(commit.mock.calls[0]).toEqual([types.CLEAR_USER]);
+    });
+  });
+
+  describe('#validityCheck on 401', () => {
+    beforeEach(() => {
+      axios.get.mockRejectedValue({ response: { status: 401 } });
+    });
+
+    it('calls recoverSession and not clearCookiesOnLogout in SSO mode', async () => {
+      window.chatwootConfig = { ssoMode: true };
+      recoverSession.mockResolvedValue();
+
+      await actions.validityCheck({ commit });
+
+      expect(recoverSession).toHaveBeenCalledTimes(1);
+      expect(APIHelpers.clearCookiesOnLogout).not.toHaveBeenCalled();
+    });
+
+    it('clears the user instead of looping when recovery is blocked', async () => {
+      window.chatwootConfig = { ssoMode: true };
+      recoverSession.mockRejectedValue(new Error('sso_recovery_loop'));
+
+      await actions.validityCheck({ commit });
+
+      expect(commit).toHaveBeenCalledWith(types.CLEAR_USER);
+    });
+
+    it('still calls clearCookiesOnLogout when SSO mode is off', async () => {
+      window.chatwootConfig = { ssoMode: false };
+
+      await actions.validityCheck({ commit });
+
+      expect(APIHelpers.clearCookiesOnLogout).toHaveBeenCalledTimes(1);
+      expect(recoverSession).not.toHaveBeenCalled();
+    });
+  });
+
   describe('#validityCheck', () => {
     it('sends correct actions if API is success', async () => {
       axios.get.mockResolvedValue({

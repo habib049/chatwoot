@@ -2,6 +2,8 @@ import types from '../mutation-types';
 import authAPI from '../../api/auth';
 
 import { setUser, clearCookiesOnLogout } from '../utils/api';
+import { isSsoMode } from 'shared/helpers/ssoMode';
+import { proxyLogin, recoverSession } from 'dashboard/helper/ssoSession';
 import SessionStorage from 'shared/helpers/sessionStorage';
 import { SESSION_STORAGE_KEYS } from 'dashboard/constants/sessionStorage';
 
@@ -109,13 +111,28 @@ export const actions = {
       context.commit(types.SET_CURRENT_USER, currentUser);
     } catch (error) {
       if (error?.response?.status === 401) {
-        clearCookiesOnLogout();
+        if (!isSsoMode()) {
+          clearCookiesOnLogout();
+          return;
+        }
+        try {
+          await recoverSession();
+        } catch (recoveryError) {
+          // Recovery already ran moments ago: stop here instead of looping.
+          context.commit(types.CLEAR_USER);
+        }
       }
     }
   },
   async setUser({ commit, dispatch }) {
     if (authAPI.hasAuthCookie()) {
       await dispatch('validityCheck');
+    } else if (isSsoMode()) {
+      try {
+        commit(types.SET_CURRENT_USER, await proxyLogin());
+      } catch (error) {
+        commit(types.CLEAR_USER);
+      }
     } else {
       commit(types.CLEAR_USER);
     }
