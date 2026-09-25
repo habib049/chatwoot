@@ -8,6 +8,7 @@ import { clearCookiesOnLogout } from 'dashboard/store/utils/api.js';
 import { copyTextToClipboard } from 'shared/helpers/clipboard';
 import { parseAPIErrorResponse } from 'dashboard/store/utils/api';
 import { parseBoolean } from '@chatwoot/utils';
+import { isSsoMode } from 'shared/helpers/ssoMode';
 import UserProfilePicture from './UserProfilePicture.vue';
 import UserBasicDetails from './UserBasicDetails.vue';
 import MessageSignature from './MessageSignature.vue';
@@ -57,6 +58,7 @@ export default {
       isEditorHotKeyEnabled,
       updateUISettings,
       replaceInstallationName,
+      isSsoMode,
     };
   },
   data() {
@@ -242,7 +244,9 @@ export default {
           :name="name"
           :display-name="displayName"
           :email="email"
-          :email-enabled="!globalConfig.disableUserProfileUpdate"
+          :email-enabled="
+            !globalConfig.disableUserProfileUpdate && !isSsoMode()
+          "
           @update-user="updateProfile"
         />
       </div>
@@ -315,7 +319,7 @@ export default {
       </div>
     </SectionLayout>
     <SectionLayout
-      v-if="!globalConfig.disableUserProfileUpdate"
+      v-if="!globalConfig.disableUserProfileUpdate && !isSsoMode()"
       with-border
       :title="$t('PROFILE_SETTINGS.FORM.PASSWORD_SECTION.TITLE')"
       description=""
@@ -323,7 +327,7 @@ export default {
       <ChangePassword />
     </SectionLayout>
     <SectionLayout
-      v-if="isMfaEnabled"
+      v-if="isMfaEnabled && !isSsoMode()"
       with-border
       :title="$t('PROFILE_SETTINGS.FORM.SECURITY_SECTION.TITLE')"
       :description="$t('PROFILE_SETTINGS.FORM.SECURITY_SECTION.NOTE')"

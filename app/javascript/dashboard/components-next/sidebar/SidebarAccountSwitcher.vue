@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { useAccount } from 'dashboard/composables/useAccount';
 import { useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
+import { isSsoMode } from 'shared/helpers/ssoMode';
 import ButtonNext from 'next/button/Button.vue';
 import Icon from 'next/icon/Icon.vue';
 import Logo from 'next/icon/Logo.vue';
@@ -136,7 +137,9 @@ const emitNewAccount = () => {
           </template>
         </DropdownItem>
       </DropdownSection>
-      <DropdownItem v-if="globalConfig.createNewAccountFromDashboard">
+      <DropdownItem
+        v-if="globalConfig.createNewAccountFromDashboard && !isSsoMode()"
+      >
         <ButtonNext
           color="slate"
           variant="faded"
