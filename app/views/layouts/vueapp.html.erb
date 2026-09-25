@@ -50,6 +50,8 @@
         signupEnabled: '<%= @global_config['ENABLE_ACCOUNT_SIGNUP'] %>',
         isEnterprise: '<%= @global_config['IS_ENTERPRISE'] %>',
         isMfaEnabled: '<%= Chatwoot.mfa_enabled? %>',
+        ssoMode: <%= SsoMode.enabled? ? 'true' : 'false' %>,
+        smbName: '<%= SsoMode.enabled? ? SsoMode.portal_name : '' %>',
         <% if @global_config['IS_ENTERPRISE'] %>
         enterprisePlanName: '<%= @global_config['INSTALLATION_PRICING_PLAN'] %>',
         <% end %>

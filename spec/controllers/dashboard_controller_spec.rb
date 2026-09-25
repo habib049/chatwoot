@@ -18,6 +18,25 @@ describe '/app/login', type: :request do
     end
   end
 
+  context 'with SSO config' do
+    it 'renders ssoMode true and smbName when AUTH_TYPE is SSO' do
+      with_modified_env AUTH_TYPE: 'SSO', SSO_ACCOUNT_ID: '1', SMB_NAME: 'portal' do
+        get '/app/login'
+        expect(response.body).to include 'ssoMode: true,'
+        expect(response.body).to include "smbName: 'portal',"
+      end
+    end
+
+    it 'renders ssoMode false and an empty smbName when AUTH_TYPE is unset' do
+      with_modified_env AUTH_TYPE: nil, SMB_NAME: 'portal' do
+        get '/app/login'
+        expect(response.body).to include 'ssoMode: false,'
+        expect(response.body).to include "smbName: '',"
+        expect(response.body).not_to include 'portal'
+      end
+    end
+  end
+
   context 'with non-HTML format' do
     it 'returns not acceptable for JSON with error message' do
       get '/app/login', headers: { 'Accept' => 'application/json' }
