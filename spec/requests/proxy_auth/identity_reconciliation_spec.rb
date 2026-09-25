@@ -123,6 +123,49 @@ RSpec.describe 'ProxyAuth identity reconciliation', type: :request do
     end
   end
 
+  # devise_token_auth authenticates from the three headers, from params, and from a Bearer token. The
+  # reconciler compares whoever DTA authenticated, so none of these channels can skip the identity check.
+  describe 'when the credentials arrive by another devise_token_auth channel' do
+    let(:params_auth) { { 'access-token' => auth['access-token'], 'client' => auth['client'], 'uid' => auth['uid'] } }
+    let(:bearer) { auth.find { |key, _| key.casecmp('authorization').zero? }&.last }
+
+    def call_profile_with(credentials, proxy_email)
+      get '/api/v1/profile', **credentials, headers: { 'X-Auth-Request-Email' => proxy_email }.compact
+    end
+
+    it 'flushes a mismatch when the credentials are query params' do
+      call_profile_with({ params: params_auth }, 'bob@example.com')
+
+      expect_flushed('sso_identity_changed')
+      expect(user.reload.tokens).not_to have_key(client)
+      expect(response.body).not_to include('alice')
+    end
+
+    it 'flushes a mismatch when the credentials are a Bearer Authorization header' do
+      expect(bearer).to be_present
+      get '/api/v1/profile', headers: { 'Authorization' => bearer, 'X-Auth-Request-Email' => 'bob@example.com' }
+
+      expect_flushed('sso_identity_changed')
+      expect(user.reload.tokens).not_to have_key(client)
+    end
+
+    it 'lets a matching identity through on both channels' do
+      call_profile_with({ params: params_auth }, 'ALICE@example.com')
+      expect(response).to have_http_status(:success)
+
+      get '/api/v1/profile', headers: { 'Authorization' => bearer, 'X-Auth-Request-Email' => '  alice@example.com ' }
+      expect(response).to have_http_status(:success)
+    end
+
+    it 'does not reconcile a request that carries no devise_token_auth credentials at all' do
+      get '/api/v1/profile', headers: { 'X-Auth-Request-Email' => 'bob@example.com' }
+
+      expect(response).to have_http_status(:unauthorized)
+      expect(response.parsed_body['error_code']).not_to eq('sso_identity_changed')
+      expect(user.reload.tokens).to have_key(client)
+    end
+  end
+
   describe 'with an invalid or expired token' do
     it 'returns 401 sso_session_required, expires the cookie and revokes nothing for an expired token' do
       tokens = user.reload.tokens.deep_dup
@@ -183,10 +226,7 @@ RSpec.describe 'ProxyAuth identity reconciliation', type: :request do
       it "does not skip the controller path #{path}" do
         controller = ApplicationController.new
         allow(controller).to receive(:controller_path).and_return(path)
-        request = instance_double(ActionDispatch::Request, headers: {})
-        allow(controller).to receive(:request).and_return(request)
-        expect(request).to receive(:headers).at_least(:once).and_return({})
-        controller.send(:reconcile_proxy_identity)
+        expect(controller.send(:reconcilable_request?)).to be(true)
       end
     end
 
@@ -209,7 +249,9 @@ RSpec.describe 'ProxyAuth identity reconciliation', type: :request do
     %w[access-token client uid].each do |missing|
       blank_values.each do |value|
         it "leaves the request untouched when #{missing} is #{value == :omit ? 'missing' : value.inspect}" do
-          headers = auth.merge('X-Auth-Request-Email' => 'bob@example.com')
+          # The Bearer Authorization header carries the same credentials and would still authenticate the
+          # request (covered by the "other devise_token_auth channel" examples), so it is dropped here.
+          headers = auth.except('authorization', 'Authorization').merge('X-Auth-Request-Email' => 'bob@example.com')
           value == :omit ? headers.delete(missing) : headers[missing] = value
 
           get '/api/v1/profile', headers: headers
