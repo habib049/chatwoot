@@ -398,4 +398,133 @@ RSpec.describe 'Profile API', type: :request do
       end
     end
   end
+
+  describe 'PUT /api/v1/profile in SSO mode' do
+    let(:sso_env) { { 'AUTH_TYPE' => 'SSO', 'SSO_ACCOUNT_ID' => '1', 'SMB_NAME' => 'chat' } }
+    let(:agent) { create(:user, password: 'Test123!', email: 'Agent@Example.com', account: account, role: :agent) }
+
+    def put_profile(profile)
+      put '/api/v1/profile', params: { profile: profile }, headers: agent.create_new_auth_token, as: :json
+    end
+
+    around { |example| with_modified_env(sso_env) { example.run } }
+
+    it 'rejects a password change with 403 and changes nothing' do
+      digest = agent.encrypted_password
+      put_profile(current_password: 'Test123!', password: 'Test1234!', password_confirmation: 'Test1234!')
+
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body['error_code']).to eq('sso_local_auth_disabled')
+      expect(agent.reload.encrypted_password).to eq(digest)
+    end
+
+    %w[password password_confirmation current_password].each do |key|
+      it "rejects a non-blank #{key} on its own with 403" do
+        put_profile(key => 'x', :name => 'Renamed')
+        expect(response).to have_http_status(:forbidden)
+        expect(agent.reload.name).not_to eq('Renamed')
+      end
+    end
+
+    it 'rejects an email change to a different address with 403 and does not change the user' do
+      put_profile(email: 'someone.else@example.com', name: 'Renamed')
+
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body['error_code']).to eq('sso_local_auth_disabled')
+      agent.reload
+      expect(agent.email).to eq('agent@example.com')
+      expect(agent.name).not_to eq('Renamed')
+    end
+
+    it 'allows name, display_name, message_signature and ui_settings updates' do
+      put_profile(name: 'New Name', display_name: 'Newbie', message_signature: 'Cheers', ui_settings: { theme: 'dark' })
+
+      expect(response).to have_http_status(:success)
+      agent.reload
+      expect([agent.name, agent.display_name, agent.message_signature]).to eq(['New Name', 'Newbie', 'Cheers'])
+      expect(agent.ui_settings['theme']).to eq('dark')
+    end
+
+    it 'allows an unchanged email in a different case or with whitespace, and blank password fields' do
+      put_profile(email: '  AGENT@example.COM ', name: 'Same Email', password: '', password_confirmation: '', current_password: '')
+
+      expect(response).to have_http_status(:success)
+      expect(agent.reload.name).to eq('Same Email')
+    end
+
+    it 'allows an avatar update' do
+      put '/api/v1/profile',
+          params: { profile: { avatar: fixture_file_upload(Rails.root.join('spec/assets/avatar.png'), 'image/png') } },
+          headers: agent.create_new_auth_token
+      expect(response).to have_http_status(:success)
+      expect(agent.reload.avatar).to be_attached
+    end
+
+    credential_keys = %w[email password password_confirmation current_password]
+    [['array', ['a']], ['hash', { 'a' => 'b' }], ['number', 5], ['null', nil], ['boolean', true]].each do |label, value|
+      credential_keys.each do |key|
+        it "returns 422 sso_invalid_param for a #{label} #{key}" do
+          digest = agent.encrypted_password
+          put_profile(key => value, :name => 'Renamed')
+
+          expect(response).to have_http_status(422)
+          expect(response.parsed_body['error_code']).to eq('sso_invalid_param')
+          agent.reload
+          expect(agent.encrypted_password).to eq(digest)
+          expect(agent.name).not_to eq('Renamed')
+        end
+      end
+    end
+
+    it 'returns 422 when profile itself is not a hash' do
+      put_profile('just-a-string')
+      expect(response).to have_http_status(422)
+      expect(response.parsed_body['error_code']).to eq('sso_invalid_param')
+    end
+
+    it 'ignores the DB-backed DISABLE_USER_PROFILE_UPDATE flag' do
+      InstallationConfig.where(name: 'DISABLE_USER_PROFILE_UPDATE').delete_all
+      InstallationConfig.create!(name: 'DISABLE_USER_PROFILE_UPDATE', serialized_value: { value: false }.with_indifferent_access)
+      GlobalConfig.clear_cache
+      put_profile(email: 'other@example.com')
+      expect(response).to have_http_status(:forbidden)
+    ensure
+      GlobalConfig.clear_cache
+    end
+
+    it 'does not treat a differently-cased param name as the password param' do
+      digest = agent.encrypted_password
+      put_profile(Password: 'Test1234!', name: 'Renamed')
+      expect(response).to have_http_status(:success)
+      expect(agent.reload.encrypted_password).to eq(digest)
+    end
+
+    it 'still returns 401 for an unauthenticated request' do
+      put '/api/v1/profile', params: { profile: { password: 'x' } }, as: :json
+      expect(response).to have_http_status(:unauthorized)
+    end
+  end
+
+  describe 'PUT /api/v1/profile with SSO mode unset' do
+    let(:agent) { create(:user, password: 'Test123!', account: account, role: :agent) }
+
+    around { |example| with_modified_env('AUTH_TYPE' => nil) { example.run } }
+
+    it 'still changes the password and the email as before' do
+      put '/api/v1/profile',
+          params: { profile: { current_password: 'Test123!', password: 'Test1234!', password_confirmation: 'Test1234!' } },
+          headers: agent.create_new_auth_token, as: :json
+      expect(response).to have_http_status(:success)
+      expect(agent.reload.valid_password?('Test1234!')).to be true
+
+      put '/api/v1/profile', params: { profile: { email: 'renamed@example.com' } }, headers: agent.create_new_auth_token, as: :json
+      expect(response).to have_http_status(:success)
+      expect(response.body).not_to include('sso_')
+    end
+
+    it 'does not return 422 sso_invalid_param for odd types' do
+      put '/api/v1/profile', params: { profile: { email: ['a'] } }, headers: agent.create_new_auth_token, as: :json
+      expect(response.body).not_to include('sso_invalid_param')
+    end
+  end
 end
