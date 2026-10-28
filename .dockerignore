@@ -17,3 +17,6 @@ vendor/bundle
 *~
 # Devkit env for docker/mpass/docker-compose.devkit.yml (secrets)
 docker/mpass/.env
+
+# Chatwoot MCP server: its own project with its own Dockerfile (mcp/Dockerfile)
+mcp
